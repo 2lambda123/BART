@@ -1,4 +1,4 @@
-#include "formulation/scalar/diffusion.h"
+#include "formulation/scalar/diffusion.hpp"
 
 #include <array>
 #include <memory>
@@ -9,9 +9,9 @@
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/tria.h>
 
-#include "data/cross_sections.h"
-#include "domain/finite_element/tests/finite_element_mock.h"
-#include "material/tests/mock_material.h"
+#include "data/cross_sections/material_cross_sections.hpp"
+#include "domain/finite_element/tests/finite_element_mock.hpp"
+#include "data/material/tests/material_mock.hpp"
 #include "test_helpers/gmock_wrapper.h"
 #include "test_helpers/test_helper_functions.h"
 #include "test_helpers/test_assertions.hpp"
@@ -25,6 +25,8 @@ using ::testing::DoDefault;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::_;
+using ::testing::Ref;
+using ::testing::AtLeast;
 using namespace bart;
 
 namespace test_helpers = bart::test_helpers;
@@ -37,7 +39,7 @@ class FormulationCFEMDiffusionTest : public ::testing::Test {
         fe_(1) {};
   using Matrix = dealii::FullMatrix<double>;
   std::shared_ptr<domain::finite_element::FiniteElementMock<2>> fe_mock_ptr;
-  std::shared_ptr<data::CrossSections> cross_sections_ptr;
+  std::shared_ptr<data::cross_sections::MaterialCrossSections> cross_sections_ptr;
 
   dealii::DoFHandler<2>::active_cell_iterator cell_ptr_;
   dealii::Triangulation<2> triangulation_;
@@ -54,7 +56,7 @@ void FormulationCFEMDiffusionTest::SetUp() {
   SetUpDealii();
   // Make mock objects. Cross-sections is a struct that cannot be mocked, but
   // we can mock the material object it is based on.
-  NiceMock<btest::MockMaterial> mock_material;
+  NiceMock<data::material::MaterialMock> mock_material;
   fe_mock_ptr = std::make_shared<NiceMock<domain::finite_element::FiniteElementMock<2>>>();
 
   ON_CALL(*fe_mock_ptr, dofs_per_cell()).WillByDefault(Return(2));
@@ -95,7 +97,7 @@ void FormulationCFEMDiffusionTest::SetUp() {
   ON_CALL(mock_material, GetFissileIDMap()).WillByDefault(Return(fissile_id));
   ON_CALL(mock_material, GetChiNuSigF()).WillByDefault(Return(sigma_s));
 
-  cross_sections_ptr = std::make_shared<data::CrossSections>(mock_material);
+  cross_sections_ptr = std::make_shared<data::cross_sections::MaterialCrossSections>(mock_material);
 }
 
 // Set up a simple deal.ii problem so that the cell points to something, this
@@ -145,8 +147,9 @@ TEST_F(FormulationCFEMDiffusionTest, PrecalculateTest) {
 
   // Set call expectations
   EXPECT_CALL(*fe_mock_ptr, SetCell(_)).Times(1);
-  EXPECT_CALL(*fe_mock_ptr, ShapeValue(_,_)).Times(16).WillRepeatedly(DoDefault());
-  EXPECT_CALL(*fe_mock_ptr, ShapeGradient(_,_)).Times(16).WillRepeatedly(DoDefault());
+  // These are called at least 4 times which is the minimum required for 2 dofs and 2 quadrature points
+  EXPECT_CALL(*fe_mock_ptr, ShapeValue(_,_)).Times(::testing::AtLeast(4)).WillRepeatedly(DoDefault());
+  EXPECT_CALL(*fe_mock_ptr, ShapeGradient(_,_)).Times(::testing::AtLeast(4)).WillRepeatedly(DoDefault());
 
   test_diffusion.Precalculate(cell_ptr_);
   auto shape_squared = test_diffusion.GetShapeSquared();
@@ -157,6 +160,28 @@ TEST_F(FormulationCFEMDiffusionTest, PrecalculateTest) {
   EXPECT_TRUE(AreEqual(gradient_matrix_q_0, gradient_squared.at(0)));
   EXPECT_TRUE(AreEqual(gradient_matrix_q_1, gradient_squared.at(1)));
   EXPECT_TRUE(test_diffusion.is_initialized());
+}
+
+TEST_F(FormulationCFEMDiffusionTest, FillCellConstantTermTest) {
+  dealii::Vector<double> test_vector(2);
+  dealii::Vector<double> expected_values{ 54, 129 };
+  dealii::Vector<double> constant_vector_at_dofs(2);
+  std::vector<double> constant_vector_at_quadrature{ 7, 9 };
+
+  formulation::scalar::Diffusion<2> test_diffusion(fe_mock_ptr, cross_sections_ptr);
+  EXPECT_CALL(*fe_mock_ptr, SetCell(cell_ptr_)).Times(1);
+  EXPECT_CALL(*fe_mock_ptr, ValueAtQuadrature(Ref(constant_vector_at_dofs)))
+      .WillOnce(Return(constant_vector_at_quadrature));
+
+  for (int q = 0; q < 2; ++q) {
+    EXPECT_CALL(*fe_mock_ptr, Jacobian(q)).Times(AtLeast(1)).WillRepeatedly(DoDefault());
+    for (int i = 0; i < 2; ++i) {
+      EXPECT_CALL(*fe_mock_ptr, ShapeValue(i,q)).Times(AtLeast(1)).WillRepeatedly(DoDefault());
+    }
+  }
+
+  test_diffusion.FillCellConstantTerm(test_vector, cell_ptr_, constant_vector_at_dofs);
+  EXPECT_TRUE(AreEqual(expected_values, test_vector));
 }
 
 TEST_F(FormulationCFEMDiffusionTest, FillCellStreamingTermTest) {

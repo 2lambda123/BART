@@ -4,17 +4,17 @@
 #include <functional>
 #include <memory>
 
-#include "domain/domain_types.h"
-#include "formulation/formulation_types.h"
-#include "formulation/tests/stamper_mock.h"
-#include "system/terms/tests/bilinear_term_mock.h"
-#include "system/terms/tests/linear_term_mock.h"
+#include "domain/domain_types.hpp"
+#include "formulation/formulation_types.hpp"
+#include "formulation/tests/stamper_mock.hpp"
+#include "system/terms/tests/bilinear_term_mock.hpp"
+#include "system/terms/tests/linear_term_mock.hpp"
 #include "system/moments/tests/spherical_harmonic_mock.h"
-#include "system/system.h"
+#include "system/system.hpp"
 #include "test_helpers/gmock_wrapper.h"
 #include "test_helpers/test_helper_functions.h"
 #include "test_helpers/dealii_test_domain.h"
-#include "problem/parameter_types.h"
+#include "problem/parameter_types.hpp"
 
 namespace bart {
 
